@@ -8,4 +8,4 @@ df_long.rename(columns={'level_1':'Ticker'},inplace=True)#改欄位名改成Tick
 df_long= df_long.sort_values(by=['Ticker','Date'])
 df_long.to_csv("stock.csv",index=False,encoding='utf-8-sig')
 print(f"欄位: {df_long.columns.tolist()}")
-print(f"資料型態: {df_long.dtypes}")
+print(f"資料型態:\n {df_long.dtypes}")
