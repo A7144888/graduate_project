@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 多來源財經新聞爬蟲（Selenium v2）
-來源：Yahoo奇摩股市（限[Yahoo股市]來源）、經濟日報、天下雜誌、自由時報、中央社
+來源：Yahoo奇摩股市（限[Yahoo股市]來源）、經濟日報、自由時報、中央社
 """
 
 import re
@@ -30,8 +30,8 @@ logging.getLogger("newspaper").setLevel(logging.ERROR)
 # ★ 使用者設定
 # ============================================================
 KEYWORD    = "台積電"
-START_DATE = "2026-02-20"   # YYYY-MM-DD（含）
-END_DATE   = "2026-02-23"   # YYYY-MM-DD（含）
+START_DATE = "2026-02-23"   # YYYY-MM-DD（含）
+END_DATE   = "2026-02-24"   # YYYY-MM-DD（含）
 MAX_PAGES  = 5              # 各來源最多爬幾頁
 DELAY      = 1.5            # 翻頁間隔（秒）
 HEADLESS   = True           # False 可顯示瀏覽器視窗
@@ -96,7 +96,7 @@ def parse_tw_date(text: str):
     if m:
         n, u = int(m.group(1)), m.group(2)
         d = now - (timedelta(hours=n) if u == "小時" else timedelta(minutes=n))
-        return d.strftime("%Y-%m-%d")
+        return d.strftime("%Y-%m-%d %H:%M")
     if re.search(r"昨[天日]", t):
         return (now - timedelta(days=1)).strftime("%Y-%m-%d")
     m = re.search(r"(\d+)\s*天前", t)
@@ -139,6 +139,9 @@ _NOISE_LINE_RE = re.compile(
     r"|免費註冊.*解鎖全文.*"
     r"|有限額度觀看.*"
     r"|剩\s*\d*\s*篇$"
+    # ── 自由時報專屬雜訊 ────────────────────────────────────
+    r"|一手掌握經濟脈動.*"                  # YouTube 頻道推廣
+    r"|不用抽\s+不用搶.*"                   # APP 下載推廣
     # ── 中央社（CNA）專屬雜訊 ──────────────────────────────
     r"|#\S+"                                # #hashtag 行
     r"|請同意我們的隱私權規範.*"            # 隱私聲明
@@ -210,15 +213,28 @@ def _html_date(soup: BeautifulSoup, url: str):
         meta = soup.find("meta", property=prop) or soup.find("meta", {"name": prop})
         if meta and meta.get("content"):
             raw = meta["content"]
-            d = raw.split("T")[0] if "T" in raw else raw[:10]
-            if re.match(r"\d{4}-\d{2}-\d{2}", d):
-                return d
+            if "T" in raw:
+                date_part = raw.split("T")[0]
+                time_part = raw.split("T")[1][:5]
+                if re.match(r"\d{4}-\d{2}-\d{2}", date_part):
+                    return f"{date_part} {time_part}"
+            else:
+                d = raw[:10]
+                if re.match(r"\d{4}-\d{2}-\d{2}", d):
+                    return d
 
     # 2. <time datetime="...">
     for t_el in soup.find_all("time", {"datetime": True}):
-        raw = t_el["datetime"][:10]
-        if re.match(r"\d{4}-\d{2}-\d{2}", raw):
-            return raw
+        dt_str = t_el["datetime"]
+        if "T" in dt_str:
+            date_part = dt_str.split("T")[0]
+            time_part = dt_str.split("T")[1][:5]
+            if re.match(r"\d{4}-\d{2}-\d{2}", date_part):
+                return f"{date_part} {time_part}"
+        else:
+            raw = dt_str[:10]
+            if re.match(r"\d{4}-\d{2}-\d{2}", raw):
+                return raw
 
     # 3. CNA URL: /news/afe/202602230019.aspx
     m = re.search(r"/news/\w+/(20\d{2})(\d{2})(\d{2})\d+\.aspx", url)
@@ -243,6 +259,14 @@ def _html_date(soup: BeautifulSoup, url: str):
     m = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})日", soup.get_text())
     if m:
         return f"{m.group(1)}-{m.group(2).zfill(2)}-{m.group(3).zfill(2)}"
+
+    # 7. 頁面文字中的 YYYY/MM/DD HH:MM（如經濟日報 2026/02/23 21:38）
+    m = re.search(
+        r"(20\d{2})/(0[1-9]|1[0-2])/(0[1-9]|[12]\d|3[01])\s+(\d{2}):(\d{2})",
+        soup.get_text(),
+    )
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}"
 
     return None
 
@@ -293,7 +317,7 @@ def extract_article(url: str, source: str = "") -> dict | None:
             art.download()
             art.parse()
             if len(art.text) >= 50:
-                pub = art.publish_date.strftime("%Y-%m-%d") if art.publish_date else None
+                pub = art.publish_date.strftime("%Y-%m-%d %H:%M") if art.publish_date else None
                 if pub is None:
                     pub = _html_date(BeautifulSoup(art.html, "html.parser"), url)
                 result = {"title": art.title, "text": art.text, "publish_date": pub,
@@ -455,56 +479,7 @@ def scrape_udn(driver: webdriver.Chrome, keyword: str) -> list[str]:
 
 
 # ──────────────────────────────────────────────────────────
-# 3. 天下雜誌
-# ──────────────────────────────────────────────────────────
-def scrape_cw(driver: webdriver.Chrome, keyword: str) -> list[str]:
-    """天下雜誌搜尋，依發布日在後置步驟篩選"""
-    print("[搜尋] 天下雜誌...")
-    links, seen = [], set()
-    q = quote(keyword)
-
-    for page in range(1, MAX_PAGES + 1):
-        url = (f"https://www.cw.com.tw/search/doSearch.action"
-               f"?key={q}&channel=all&sort=desc&page={page}")
-        try:
-            driver.get(url)
-            # 等待文章連結出現
-            try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located(
-                        (By.CSS_SELECTOR, "a[href*='/article/']")))
-            except TimeoutException:
-                time.sleep(3)
-        except Exception:
-            break
-
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        pg_links = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"] or ""
-            if href.startswith("/"):
-                href = "https://www.cw.com.tw" + href
-            try:
-                p = urlparse(href)
-                if p.netloc == "www.cw.com.tw" and "/article/" in p.path:
-                    clean = f"{p.scheme}://{p.netloc}{p.path}"
-                    if clean not in seen:
-                        seen.add(clean)
-                        pg_links.append(clean)
-            except Exception:
-                pass
-
-        if not pg_links:
-            break
-        links.extend(pg_links)
-        time.sleep(DELAY)
-
-    print(f"  → {len(links)} 個連結")
-    return links
-
-
-# ──────────────────────────────────────────────────────────
-# 4. 自由時報（SPA，需等 JS 渲染）
+# 3. 自由時報（SPA，需等 JS 渲染）
 # ──────────────────────────────────────────────────────────
 def scrape_ltn(driver: webdriver.Chrome, keyword: str) -> list[str]:
     """
@@ -651,8 +626,6 @@ if __name__ == "__main__":
             source_triples.append((u, "Yahoo股市", False))
         for u in scrape_udn(driver, KEYWORD):
             source_triples.append((u, "經濟日報", True))   # URL 已含日期過濾
-        for u in scrape_cw(driver, KEYWORD):
-            source_triples.append((u, "天下雜誌", False))
         for u in scrape_ltn(driver, KEYWORD):
             source_triples.append((u, "自由時報", True))   # URL 已含日期過濾
         for u in scrape_cna(driver, KEYWORD):
@@ -686,12 +659,12 @@ if __name__ == "__main__":
             data.append(art)
         time.sleep(DELAY)
 
-    if skipped_irrelevant:
-        print(f"[過濾] 排除與關鍵字無關的文章 {skipped_irrelevant} 篇")
+    
 
     # ── 整理 DataFrame ────────────────────────────────────
     cols = ["title", "text", "publish_date", "source", "url"]
     df = pd.DataFrame(data, columns=cols) if data else pd.DataFrame(columns=cols)
+    df.drop(columns=["url"], inplace=True, errors="ignore")
 
     if df.empty:
         print("\n[結果] 此關鍵字與日期區間內沒有成功解析的新聞。")
@@ -707,8 +680,7 @@ if __name__ == "__main__":
             | (df["_d"] == "")         # 無日期但已通過來源篩選者保留
         ].copy()
         df.drop(columns=["_d"], inplace=True)
-        print(f"[篩選] 依發布日保留 {len(df)} 則"
-              f"（排除 {before - len(df)} 則區間外）")
+        
 
         # 預覽前 3 則
         print("\n========== 前 3 則新聞 ==========")
@@ -718,7 +690,6 @@ if __name__ == "__main__":
             print("來源：", r["source"])
             print("標題：", r["title"])
             print("日期：", r["publish_date"])
-            print("網址：", r["url"])
             print("內文前 200 字：")
             print(str(r["text"])[:200])
             print("================================")
