@@ -40,9 +40,21 @@ def analyze_full_news(stock_id, title, content):
     """
     try:
         response = ollama.chat(model=MODEL_NAME, messages=[{'role': 'user', 'content': prompt}], format='json')
-        return json.loads(response['message']['content'])
+        content = response['message']['content']
+        
+        # --- 新增的清洗邏輯：移除 Markdown 標籤並處理潛在的格式錯誤 ---
+        content = content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        
+        return json.loads(content)
     except Exception as e:
+        # 如果還是報錯，印出原始內容方便除錯
         print(f"   ❌ LLM 分析出錯: {e}")
+        # print(f"   Debug 原始回傳內容: {content}") 
         return None
 
 # --- 主程式執行 ---
