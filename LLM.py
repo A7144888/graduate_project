@@ -7,9 +7,9 @@ from bs4 import BeautifulSoup
 
 # --- 設定區 ---
 INPUT_FILE = "news.csv"
-OUTPUT_FILE = "test_analysis.csv"
+OUTPUT_FILE = "LLM_score.csv"
 MODEL_NAME = "llama3.1:latest"
-TEST_COUNT = 3
+# TEST_COUNT 已移除，改為全量處理
 
 # 初始化爬蟲器
 scraper = cloudscraper.create_scraper()
@@ -109,12 +109,12 @@ def analyze_full_news(stock_id, title, content):
 # --- 主程式執行 ---
 try:
     df_all = pd.read_csv(INPUT_FILE)
-    df_test = df_all.head(TEST_COUNT).copy()
-    print(f"🚀 開始測試 ...")
+    total_count = len(df_all)
+    print(f"🚀 開始全量處理，共 {total_count} 則新聞 ...")
 
     results = []
-    for index, row in df_test.iterrows():
-        print(f"\n👉 [{index+1}/{TEST_COUNT}] 處理中: {row['stock_id']} - {row['title'][:15]}...")
+    for index, row in df_all.iterrows():
+        print(f"\n👉 [{index+1}/{total_count}] 處理中: {row['stock_id']} - {row['title'][:15]}...")
         
         full_text = fetch_news_content_stable(row['link'])
         
@@ -127,10 +127,11 @@ try:
         
         if analysis:
             results.append({**row.to_dict(), **analysis})
-            print(f"   ✅ 分析完成！情緒: {analysis.get('sentiment_score')} | 時效: {analysis.get('urgency')}")
+            print(f"   ✅ 分析完成！情緒: {analysis.get('sentiment_score')} | 時效: {analysis.get('time_horizon')}")
         else:
             results.append(row.to_dict())
 
+    # 儲存結果
     pd.DataFrame(results).to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
     print(f"\n✨ 任務完成！結果已存至 {OUTPUT_FILE}")
 
