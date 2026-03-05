@@ -48,8 +48,8 @@ def main():
         df = pd.read_csv(INPUT_FILE)
         
         # 轉換日期格式（僅保留日期部分，去除小時分鐘，以便按天分組）
-        # 假設 publish_date 格式為 "2026-02-23 09:18"
-        df['date_only'] = pd.to_datetime(df['publish_date']).dt.date
+        # 假設 date 格式為 "2026-02-23 09:18"
+        df['date_only'] = pd.to_datetime(df['date']).dt.date
         
         print(f"📊 正在聚合數據...")
         

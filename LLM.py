@@ -1,24 +1,30 @@
 import pandas as pd
 import ollama
 import json
+from datetime import datetime, timedelta
 
 # --- 設定區 ---
-# 修改為你上傳的檔案名稱
-INPUT_FILE = "news_台積電_2026-02-23_to_2026-02-24.csv" 
+INPUT_FILE = "old_news.csv" 
 OUTPUT_FILE = "LLM_score.csv"
 MODEL_NAME = "llama3.1:latest"
-# 固定分析對象為台積電
 STOCK_ID = "2330"
 
-def analyze_full_news(stock_id, title, content):
-    """ 送交 Ollama 分析  """
-    context_text = content if content else "（無內文，請僅就標題分析）"
-    
+def analyze_news(stock_id, title, content=None):
+    """ 
+    送交 Ollama 分析。
+    如果 content 為空或 None，則進行純標題分析。
+    """
+    if content and str(content).strip():
+        mode_desc = f"【新聞標題】：{title}\n    【新聞內文】：{content}"
+        evidence_hint = "請從內文摘錄一段具體事實或數據"
+    else:
+        mode_desc = f"【新聞標題】：{title}\n    （無內文，請僅就標題進行推論）"
+        evidence_hint = "標題推論"
+
     prompt = f"""
     你是一位專業台股分析師。請分析以下新聞對股票代號 {stock_id} 的影響。
     
-    【新聞標題】：{title}
-    【新聞內文】：{context_text}
+    {mode_desc}
 
     請嚴格以 JSON 格式回傳，不要有解釋文字。
     指標定義：
@@ -34,54 +40,57 @@ def analyze_full_news(stock_id, title, content):
         "certainty": float,
         "time_horizon": float,
         "summary": "一句話重點",
-        "evidence": "請從內文摘錄一段具體事實或數據，若無內文則填'標題推論'",
+        "evidence": "{evidence_hint}",
         "reason": "評分理由"
     }}
     """
     try:
         response = ollama.chat(model=MODEL_NAME, messages=[{'role': 'user', 'content': prompt}], format='json')
-        content = response['message']['content']
+        res_content = response['message']['content'].strip()
         
-        # --- 新增的清洗邏輯：移除 Markdown 標籤並處理潛在的格式錯誤 ---
-        content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
+        # --- 清洗邏輯：移除 Markdown 標籤 ---
+        if res_content.startswith("```json"):
+            res_content = res_content[7:]
+        if res_content.endswith("```"):
+            res_content = res_content[:-3]
+        res_content = res_content.strip()
         
-        return json.loads(content)
+        return json.loads(res_content)
     except Exception as e:
-        # 如果還是報錯，印出原始內容方便除錯
         print(f"   ❌ LLM 分析出錯: {e}")
-        # print(f"   Debug 原始回傳內容: {content}") 
         return None
 
 # --- 主程式執行 ---
 try:
     # 讀取 CSV
-    df_all = pd.read_csv(INPUT_FILE)
+    df_raw = pd.read_csv(INPUT_FILE)
+    
+    # --- 篩選 20 天內的新聞 ---
+    # 支援 'date' 或 'publish_date' 欄位名稱
+    date_col = 'date' if 'date' in df_raw.columns else 'publish_date'
+    df_raw[date_col] = pd.to_datetime(df_raw[date_col])
+    cutoff_date = datetime.now() - timedelta(days=20)
+    df_all = df_raw[df_raw[date_col] >= cutoff_date].copy()
+    # -----------------------
+
     total_count = len(df_all)
-    print(f"🚀 開始全量處理資料，共 {total_count} 則新聞 ...")
+    print(f"🚀 開始處理資料（篩選後共 {total_count} 則近 20 天新聞）...")
 
     results = []
     for index, row in df_all.iterrows():
-        # 對應 CSV 欄位: title, text
-        print(f"\n👉 [{index+1}/{total_count}] 處理中: {str(row['title'])[:20]}...")
+        print(f"\n👉 處理中: {str(row['title'])[:25]}...")
         
-        # 提取內文
-        full_text = str(row['text']) if pd.notna(row['text']) else ""
+        # 檢查是否有 text 欄位且是否有內容
+        news_content = row.get('text') if 'text' in row else None
         
-        # 執行分析
-        analysis = analyze_full_news(STOCK_ID, row['title'], full_text)
+        # 執行分析 (會自動判定是標題+內文還是純標題)
+        analysis = analyze_news(STOCK_ID, row['title'], news_content)
         
         if analysis:
-            # 合併原始 CSV 內容與 LLM 分析結果
             combined_data = {**row.to_dict(), **analysis}
             results.append(combined_data)
             print(f"   ✅ 分析完成！情緒: {analysis.get('sentiment_score')} | 時效: {analysis.get('time_horizon')}")
         else:
-            # 若分析失敗，保留原始資料並補空值
             results.append(row.to_dict())
 
     # 儲存結果
