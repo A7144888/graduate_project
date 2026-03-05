@@ -1,14 +1,16 @@
 import time
 import os
+import re
 import pandas as pd
 from FinMind.data import DataLoader
 from datetime import datetime
+from rapidfuzz import fuzz
 
 # 設定參數
 FINMIND_TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMS0yNyAxNzo1MDoyOCIsInVzZXJfaWQiOiJBNzE0NDg4OCIsImVtYWlsIjoiQTcxNDQ4ODhAZ21haWwuY29tIiwiaXAiOiI0Mi43OS4xNjMuMjQzIn0._26kyEg1nWsvGAdbvPuzbOXcHuSWTR698SDSivTAy1M"
 TARGET_STOCKS = ["2330"]
-START_DATE = "2025-01-01"
-END_DATE = "2026-03-03"
+START_DATE = "2024-01-01"
+END_DATE = "2024-01-01"
 OUTPUT_FILE = "old_news.csv"
 
 # 初始化
@@ -70,6 +72,66 @@ def getNews(stock_id, start, end, filename):
     
     print(f"\n{stock_id} 完成，共抓取 {total_news} 筆新聞\n")
 
+def normalize_title(title):
+    """清除標題中的空白、特殊符號、來源後綴，方便模糊比對"""
+    if not isinstance(title, str):
+        return ''
+    # 移除「 - 來源名稱」結尾（如 - Yahoo奇摩新聞、- 經濟日報）
+    title = re.sub(r'\s*-\s*\S+.*$', '', title)
+    # 移除所有空白與標點符號（保留中英文與數字）
+    title = re.sub(r'[\s\W]', '', title, flags=re.UNICODE)
+    return title.strip()
+
+def deduplicate_csv(filename, similarity_threshold=85):
+    """
+    去除CSV檔案中的重複新聞標題（模糊比對）
+    similarity_threshold: 相似度門檻（0~100），超過此值視為重複，預設85
+    """
+    if not os.path.exists(filename):
+        print(f"檔案不存在: {filename}")
+        return
+    
+    print(f"\n正在處理 {filename} 的去重（相似度門檻: {similarity_threshold}）...")
+    
+    # 讀取CSV，指定 stock_id 為字串格式
+    df = pd.read_csv(filename, dtype={'stock_id': str})
+    original_count = len(df)
+    
+    # 按照 date 排序，確保保留最早的一筆
+    df = df.sort_values(by=['stock_id', 'date']).reset_index(drop=True)
+    
+    # 擷取日期部分（yyyy-mm-dd）用於分組
+    df['_date_only'] = df['date'].astype(str).str[:10]
+    
+    # 正規化標題用於比對
+    df['_norm_title'] = df['title'].apply(normalize_title)
+    
+    keep_mask = [True] * len(df)
+    
+    # 只在同一天內進行模糊比對
+    for _, group in df.groupby('_date_only'):
+        indices = group.index.tolist()
+        for ii, i in enumerate(indices):
+            if not keep_mask[i]:
+                continue
+            for j in indices[ii + 1:]:
+                if not keep_mask[j]:
+                    continue
+                score = fuzz.ratio(df.at[i, '_norm_title'], df.at[j, '_norm_title'])
+                if score >= similarity_threshold:
+                    keep_mask[j] = False
+    
+    df_deduped = df[keep_mask].drop(columns=['_date_only', '_norm_title']).reset_index(drop=True)
+    
+    # 寫回檔案
+    df_deduped.to_csv(filename, index=False, encoding='utf-8-sig')
+    
+    removed_count = original_count - len(df_deduped)
+    print(f"原始筆數: {original_count}")
+    print(f"去重後: {len(df_deduped)} 筆")
+    print(f"移除重複: {removed_count} 筆")
+    print(f"檔案位置: {os.path.abspath(filename)}")
+
 
 
 
@@ -77,25 +139,7 @@ def getNews(stock_id, start, end, filename):
 for stock_id in TARGET_STOCKS:
     getNews(stock_id, START_DATE, END_DATE, OUTPUT_FILE)
 
-# 去重 排序
-if os.path.exists(OUTPUT_FILE):
-    print("正在處理資料...")
-    
-    # 讀指定 stock_id 為字串格式，保留前面的零
-    df = pd.read_csv(OUTPUT_FILE, dtype={'stock_id': str})
-    original_count = len(df)
-    
-    df = df.drop_duplicates(subset=['stock_id', 'date', 'title'])
-    df = df.sort_values(by=['stock_id', 'date'])
-    df.to_csv(OUTPUT_FILE, index=False, encoding='utf-8-sig')
-    
-    # 顯示結果
-    print(f"原始筆數: {original_count}")
-    print(f"去重後: {len(df)} 筆")
-    print(f"檔案位置: {os.path.abspath(OUTPUT_FILE)}")
-    print("\n完成!")
-    print(f"欄位: {df.columns.tolist()}")
-    print(f"資料型態: {df.dtypes}")
+# 對產生的CSV檔案進行去重
+deduplicate_csv(OUTPUT_FILE)
 
-else:
-    print("未產生CSV檔案")
+print("\n完成!")
