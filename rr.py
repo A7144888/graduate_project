@@ -150,3 +150,13 @@ print("\nNext 3 day closing prices:")
 
 for i, price in enumerate(predicted_close, 1):
     print(f"Day +{i}: {price:.2f}")
+
+last_date = stock_data.index[-1]
+future_dates = pd.bdate_range(start=last_date, periods=FORECAST_HORIZON + 1)[1:]
+
+result_df = pd.DataFrame({
+    "Date": future_dates,
+    "Predicted_Price": predicted_close
+})
+result_df.to_csv("rr.csv", index=False)
+print("Results saved to rr.csv")

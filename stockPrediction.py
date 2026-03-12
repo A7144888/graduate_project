@@ -36,7 +36,7 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 model.fit(X, y, epochs=20, batch_size=32)
 
 # Forecast future values
-future_days = 5
+future_days = 3
 
 last_window = scaled_series[-time_step:].reshape(1, time_step, 1)
 future_preds = [] 
@@ -46,7 +46,7 @@ for _ in range(future_days):
     future_preds.append(next_price[0, 0])
 
     last_window = np.roll(last_window, -1, axis=1)
-    last_window[0, -1, 0] = next_price
+    last_window[0, -1, 0] = next_price[0, 0]
 
 future_preds = scaler.inverse_transform(
     np.array(future_preds).reshape(-1, 1)
@@ -55,3 +55,13 @@ future_preds = scaler.inverse_transform(
 print("Future prices:")
 for i, p in enumerate(future_preds, 1):
     print(f"Day +{i}: {p[0]:.2f}")
+
+last_date = data.index[-1]
+future_dates = pd.bdate_range(start=last_date, periods=future_days + 1)[1:]
+
+result_df = pd.DataFrame({
+    "Date": future_dates,
+    "Predicted_Price": future_preds.flatten()
+})
+result_df.to_csv("predicted_prices.csv", index=False)
+print("Results saved to predicted_prices.csv")

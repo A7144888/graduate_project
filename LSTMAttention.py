@@ -146,3 +146,13 @@ predicted_close = scaler.inverse_transform(dummy)[:, close_index]
 print("Next 3 day closing prices:")
 for i, price in enumerate(predicted_close, 1):
     print(f"Day +{i}: {price:.2f}")
+
+last_date = stock_data.index[-1]
+future_dates = pd.bdate_range(start=last_date, periods=forecast_horizon + 1)[1:]
+
+result_df = pd.DataFrame({
+    "Date": future_dates,
+    "Predicted_Price": predicted_close
+})
+result_df.to_csv("LSTMAttention.csv", index=False)
+print("Results saved to LSTMAttention.csv")

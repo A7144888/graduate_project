@@ -1,9 +1,9 @@
 import yfinance as yf
-stocks=['2330.TW','0050.TW']
-start_date='2025-01-01'
-end_date='2026-02-24'
+stocks=['2330.TW']
+start_date='2026-03-04'
+end_date='2026-03-07'
 for stock in stocks:
-    data= yf.download(stock, start='2025-01-01',end='2026-02-24',auto_adjust=False)#沒寫end=則預設抓到今天
+    data= yf.download(stock, start=start_date,end=end_date,auto_adjust=False)#沒寫end=則預設抓到今天
 
     df_long= data.stack(level=1,future_stack=True).reset_index()#把level1的title移到垂直方向
     df_long.rename(columns={'level_1':'Ticker'},inplace=True)#改欄位名改成Ticker
