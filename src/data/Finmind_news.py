@@ -11,7 +11,8 @@ FINMIND_TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMS0yNyAx
 TARGET_STOCKS = ["2330"]
 START_DATE = "2024-01-01"
 END_DATE = "2024-01-01"
-OUTPUT_FILE = "old_news.csv"
+_DATA_RAW = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
+OUTPUT_FILE = os.path.join(_DATA_RAW, "old_news.csv")
 
 # 初始化
 dl = DataLoader(token=FINMIND_TOKEN)

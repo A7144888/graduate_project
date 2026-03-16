@@ -1,9 +1,15 @@
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-actual_df = pd.read_csv("stock_2330.TW_2026-03-04_to_2026-03-07.csv", parse_dates=["Date"])
-pred_df = pd.read_csv("predicted_prices.csv", parse_dates=["Date"])
+_BASE = os.path.join(os.path.dirname(__file__), "..", "..")
+_DATA_RAW = os.path.join(_BASE, "data", "raw")
+_DATA_OUTPUT = os.path.join(_BASE, "data", "output")
+_FIGURES = os.path.join(_BASE, "outputs", "figures")
+
+actual_df = pd.read_csv(os.path.join(_DATA_RAW, "stock_2330.TW_2026-03-04_to_2026-03-07.csv"), parse_dates=["Date"])
+pred_df = pd.read_csv(os.path.join(_DATA_OUTPUT, "predicted_prices.csv"), parse_dates=["Date"])
 
 fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -37,6 +43,6 @@ ax.legend()
 ax.grid(True, linestyle="--", alpha=0.5)
 
 plt.tight_layout()
-plt.savefig("price_comparison.png", dpi=150)
+plt.savefig(os.path.join(_FIGURES, "price_comparison.png"), dpi=150)
 plt.show()
 print("Chart saved to price_comparison.png")

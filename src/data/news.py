@@ -5,9 +5,12 @@
 來源：Yahoo奇摩股市（限[Yahoo股市]來源）、經濟日報、自由時報、中央社
 """
 
+import os
 import re
 import time
 import logging
+
+_DATA_RAW = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
 import requests as req
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlparse
@@ -695,7 +698,7 @@ if __name__ == "__main__":
             print("================================")
 
     # ── 存檔 ──────────────────────────────────────────────
-    filename = f"news_{KEYWORD}_{START_DATE}_to_{END_DATE}.csv"
+    filename = os.path.join(_DATA_RAW, f"news_{KEYWORD}_{START_DATE}_to_{END_DATE}.csv")
     df.to_csv(filename, index=False, encoding="utf-8-sig")
     print(f"\n成功寫入 CSV 共 {len(df)} 則，檔名：{filename}")
     print(f"欄位: {df.columns.tolist()}")
