@@ -3,7 +3,7 @@ import yfinance as yf
 
 _DATA_RAW = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
 
-stocks=['2330.TW']
+stocks=['^SOX']
 start_date='2021-01-01'
 end_date='2026-03-07'
 for stock in stocks:

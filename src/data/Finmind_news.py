@@ -9,10 +9,10 @@ from rapidfuzz import fuzz
 # 設定參數
 FINMIND_TOKEN="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMS0yNyAxNzo1MDoyOCIsInVzZXJfaWQiOiJBNzE0NDg4OCIsImVtYWlsIjoiQTcxNDQ4ODhAZ21haWwuY29tIiwiaXAiOiI0Mi43OS4xNjMuMjQzIn0._26kyEg1nWsvGAdbvPuzbOXcHuSWTR698SDSivTAy1M"
 TARGET_STOCKS = ["2330"]
-START_DATE = "2024-01-01"
-END_DATE = "2024-01-01"
+START_DATE = "2022-08-25"
+END_DATE = "2023-12-31"
 _DATA_RAW = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
-OUTPUT_FILE = os.path.join(_DATA_RAW, "old_news.csv")
+OUTPUT_FILE = os.path.join(_DATA_RAW, f"old_news_{START_DATE}_to_{END_DATE}.csv")
 
 # 初始化
 dl = DataLoader(token=FINMIND_TOKEN)
