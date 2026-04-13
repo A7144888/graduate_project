@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 
 # --- 設定區 ---
-INPUT_FILE = "LLM_score_2022_2023.csv"
-OUTPUT_FILE = "daily_features_2022_2023.csv"
+INPUT_FILE = "LLM_score_2024-1-1_2024-3-5.csv"
+OUTPUT_FILE = "daily_features_2024-1-1_2024-3-5.csv"
 
 def aggregate_daily_news(group):
     """
