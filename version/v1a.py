@@ -38,7 +38,8 @@ sox_data = sox_data[["Adj Close"]]
 # Align news to stock days
 # ------------------------------
 news_data = news_data.reindex(stock_data.index).fillna(0)
-
+sox_data = sox_data.reindex(stock_data.index).ffill().bfill()
+sox_data = sox_data.shift(1).bfill()
 # ------------------------------
 # Scaling
 # ------------------------------
