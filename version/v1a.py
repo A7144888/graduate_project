@@ -6,7 +6,9 @@ from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, At
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import plot_model
 from sklearn.preprocessing import MinMaxScaler
-
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.regularizers import l2
 TIME_STEP = 40
 FORECAST_HORIZON = 3
 
@@ -103,8 +105,10 @@ X_stock, X_news, X_sox, y = create_dataset(
 
 # STOCK BRANCH
 stock_input = Input(shape=(TIME_STEP, 6), name="stock_input")
-x_stock = LSTM(32, return_sequences=True)(stock_input)
-x_stock = LSTM(32)(x_stock)
+x_stock = LSTM(32, return_sequences=True, kernel_regularizer=l2(0.001))(stock_input)
+x_stock =Dropout(0.2)(x_stock)
+x_stock = LSTM(32, kernel_regularizer=l2(0.001))(x_stock)
+x_stock =Dropout(0.2)(x_stock)
 
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
@@ -112,6 +116,7 @@ x_news = Dense(32, activation="relu")(news_input)
 attention_layer = Attention()
 news_context = attention_layer([x_news, x_news])
 news_vector = LSTM(16)(news_context)
+news_vector =Dropout(0.2)(news_vector)
 
 # MERGE stock + news first, then apply Dense
 stock_news = Concatenate()([x_stock, news_vector])
@@ -120,6 +125,7 @@ stock_news = Dense(32, activation="relu")(stock_news)
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
 x_sox = LSTM(16)(sox_input)
+x_sox =Dropout(0.2)(x_sox)
 
 # MERGE stock_news + sox
 merged = Concatenate()([stock_news, x_sox])
@@ -144,7 +150,11 @@ plot_model(
     rankdir="TB",
     dpi=192
 )
-
+early_stop = EarlyStopping(
+    monitor="val_loss",
+    patience=20,
+    restore_best_weights=True
+)
 # ------------------------------
 # Training
 # ------------------------------
@@ -155,8 +165,9 @@ history = model.fit(
     [X_stock[train_size + TIME_STEP:], X_news[train_size + TIME_STEP:], X_sox[train_size + TIME_STEP:]],
     y[train_size + TIME_STEP:]
     ),
-    epochs=150,
-    batch_size=32
+    epochs=500,
+    batch_size=32,
+    callbacks=[early_stop]
 )
 plt.plot(history.history["loss"], label="Train Loss")
 plt.plot(history.history["val_loss"], label="Validation Loss")
