@@ -43,18 +43,29 @@ sox_data = sox_data.shift(1).bfill()
 # ------------------------------
 # Scaling
 # ------------------------------
+split_idx = int(len(stock_data) * 0.7)
+train_size = split_idx - TIME_STEP - FORECAST_HORIZON + 1
+
+train_stock = stock_data.iloc[:split_idx]
+train_news = news_data.iloc[:split_idx]
+train_sox = sox_data.iloc[:split_idx]
+
 
 stock_scaler = MinMaxScaler()
-scaled_stock = stock_scaler.fit_transform(stock_data)
+stock_scaler.fit(train_stock)
+scaled_stock = stock_scaler.transform(stock_data)
 
 news_scaler = MinMaxScaler()
-scaled_news = news_scaler.fit_transform(news_data)
+news_scaler.fit(train_news)
+scaled_news = news_scaler.transform(news_data)
 
 sox_scaler = MinMaxScaler()
-scaled_sox = sox_scaler.fit_transform(sox_data)
+sox_scaler.fit(train_sox)
+scaled_sox = sox_scaler.transform(sox_data)
 
 close_scaler = MinMaxScaler()
-scaled_close = close_scaler.fit_transform(stock_data[["Adj Close"]])
+close_scaler.fit(train_stock[["Adj Close"]])
+scaled_close = close_scaler.transform(stock_data[["Adj Close"]])
 
 scaled_stock_df = pd.DataFrame(scaled_stock, index=stock_data.index, columns=features)
 scaled_news_df = pd.DataFrame(scaled_news, index=news_data.index, columns=news_features)
@@ -137,15 +148,18 @@ plot_model(
 # ------------------------------
 # Training
 # ------------------------------
-past = model.fit(
-    [X_stock, X_news, X_sox],
-    y,
+history = model.fit(
+    [X_stock[:train_size], X_news[:train_size], X_sox[:train_size]],
+    y[:train_size],
+    validation_data=(
+        [X_stock[train_size:], X_news[train_size:], X_sox[train_size:]],
+        y[train_size:]
+    ),
     epochs=150,
-    batch_size=32,
-    validation_split=0.3
+    batch_size=32
 )
-plt.plot(past.history["loss"], label="Train Loss")
-plt.plot(past.history["val_loss"], label="Validation Loss")
+plt.plot(history.history["loss"], label="Train Loss")
+plt.plot(history.history["val_loss"], label="Validation Loss")
 plt.title("Model Loss Over Epochs")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
@@ -169,8 +183,6 @@ last_sox_scaled = sox_scaler.transform(sox_data.iloc[-TIME_STEP-past:-past].valu
 last_sox_scaled = last_sox_scaled.reshape(1, TIME_STEP, 1)
 
 pred_scaled = model.predict([last_stock_scaled, last_news_scaled, last_sox_scaled])[0]
-
-pred_scaled = np.clip(pred_scaled, 0, 1)
 
 predicted_close = close_scaler.inverse_transform(
     pred_scaled.reshape(-1,1)
