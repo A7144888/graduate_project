@@ -103,28 +103,28 @@ X_stock, X_news, X_sox, y = create_dataset(
 
 # STOCK BRANCH
 stock_input = Input(shape=(TIME_STEP, 6), name="stock_input")
-x_stock = LSTM(64, return_sequences=True)(stock_input)
-x_stock = LSTM(64)(x_stock)
+x_stock = LSTM(32, return_sequences=True)(stock_input)
+x_stock = LSTM(32)(x_stock)
 
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
-x_news = Dense(64, activation="relu")(news_input)
+x_news = Dense(32, activation="relu")(news_input)
 attention_layer = Attention()
 news_context = attention_layer([x_news, x_news])
-news_vector = LSTM(32)(news_context)
+news_vector = LSTM(16)(news_context)
 
 # MERGE stock + news first, then apply Dense
 stock_news = Concatenate()([x_stock, news_vector])
-stock_news = Dense(64, activation="relu")(stock_news)
+stock_news = Dense(32, activation="relu")(stock_news)
 
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
-x_sox = LSTM(32)(sox_input)
+x_sox = LSTM(16)(sox_input)
 
 # MERGE stock_news + sox
 merged = Concatenate()([stock_news, x_sox])
-merged = Dense(64, activation="relu")(merged)
 merged = Dense(32, activation="relu")(merged)
+merged = Dense(16, activation="relu")(merged)
 
 output = Dense(FORECAST_HORIZON)(merged)
 
@@ -152,8 +152,8 @@ history = model.fit(
     [X_stock[:train_size], X_news[:train_size], X_sox[:train_size]],
     y[:train_size],
     validation_data=(
-        [X_stock[train_size:], X_news[train_size:], X_sox[train_size:]],
-        y[train_size:]
+    [X_stock[train_size + TIME_STEP:], X_news[train_size + TIME_STEP:], X_sox[train_size + TIME_STEP:]],
+    y[train_size + TIME_STEP:]
     ),
     epochs=150,
     batch_size=32
