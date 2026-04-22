@@ -203,12 +203,26 @@ y_orig = y[:50]
 print("Predicted returns (original scale):", pred_orig[:5])
 print("Actual returns (original scale):", y_orig[:5])
 print("Pred std:", pred_orig.std(), "Actual std:", y_orig.std())
-print("\nNext 3 day closing prices:")
-
-for i, price in enumerate(predicted_close, 1):
-    print(f"Day +{i}: {price:.2f}")
-print(stock_data[["Adj Close"]].iloc[-past:-past+3])
 actual_close = stock_data["Adj Close"].iloc[-past:-past+3].values
+actual_dates = stock_data.index[-past:-past+3]
+actual_prev_prices = np.concatenate([[last_known_price], actual_close[:-1]])
+actual_pct_changes = (actual_close - actual_prev_prices) / actual_prev_prices * 100
+
+print("\nNext 3 day closing prices:")
+print(f"{'':10} {'Predicted':>12} {'Actual':>12}")
+print("-" * 40)
+for i in range(FORECAST_HORIZON):
+    pred_pct = pred_returns[i] * 100
+    pred_sign = "+" if pred_pct >= 0 else ""
+    act_pct = actual_pct_changes[i]
+    act_sign = "+" if act_pct >= 0 else ""
+    date_str = actual_dates[i].strftime("%Y-%m-%d")
+    print(
+        f"{date_str}  "
+        f"{predicted_close[i]:>7.2f} ({pred_sign}{pred_pct:.2f}%)  "
+        f"{actual_close[i]:>7.2f} ({act_sign}{act_pct:.2f}%)"
+    )
+
 loss = np.mean(np.abs(predicted_close - actual_close) / actual_close)
 print(f"\nMean Absolute Percentage Error: {loss:.2%}")
 for i in range(3):
