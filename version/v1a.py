@@ -65,20 +65,19 @@ sox_scaler = MinMaxScaler()
 sox_scaler.fit(train_sox)
 scaled_sox = sox_scaler.transform(sox_data)
 
-close_scaler = MinMaxScaler()
-close_scaler.fit(train_stock[["Adj Close"]])
-scaled_close = close_scaler.transform(stock_data[["Adj Close"]])
-
 scaled_stock_df = pd.DataFrame(scaled_stock, index=stock_data.index, columns=features)
 scaled_news_df = pd.DataFrame(scaled_news, index=news_data.index, columns=news_features)
 scaled_sox_df = pd.DataFrame(scaled_sox, index=sox_data.index, columns=["Adj Close"])
-scaled_close_df = pd.DataFrame(scaled_close, index=stock_data.index, columns=["Adj Close"])
+
+# 改預測每日報酬率（漲跌幅）而非絕對價格
+returns = stock_data["Adj Close"].pct_change().fillna(0)
+returns_df = pd.DataFrame(returns.values, index=stock_data.index, columns=["return"])
 
 # ------------------------------
 # Dataset creation
 # ------------------------------
 
-def create_dataset(stock_df, news_df, sox_df, close_df):
+def create_dataset(stock_df, news_df, sox_df, return_df):
 
     X_stock, X_news, X_sox, y = [], [], [], []
 
@@ -87,7 +86,7 @@ def create_dataset(stock_df, news_df, sox_df, close_df):
         X_stock.append(stock_df.iloc[i:i+TIME_STEP].values)
         X_news.append(news_df.iloc[i:i+TIME_STEP].values)
         X_sox.append(sox_df.iloc[i:i+TIME_STEP].values)
-        target = close_df.iloc[i+TIME_STEP:i+TIME_STEP+FORECAST_HORIZON]
+        target = return_df.iloc[i+TIME_STEP:i+TIME_STEP+FORECAST_HORIZON]
         y.append(target.values.flatten())
 
     return np.array(X_stock), np.array(X_news), np.array(X_sox), np.array(y)
@@ -96,7 +95,7 @@ X_stock, X_news, X_sox, y = create_dataset(
     scaled_stock_df,
     scaled_news_df,
     scaled_sox_df,
-    scaled_close_df
+    returns_df
 )
 
 # ------------------------------
@@ -105,10 +104,9 @@ X_stock, X_news, X_sox, y = create_dataset(
 
 # STOCK BRANCH
 stock_input = Input(shape=(TIME_STEP, 6), name="stock_input")
-x_stock = LSTM(32, return_sequences=True, kernel_regularizer=l2(0.001))(stock_input)
-x_stock =Dropout(0.2)(x_stock)
-x_stock = LSTM(32, kernel_regularizer=l2(0.001))(x_stock)
-x_stock =Dropout(0.2)(x_stock)
+x_stock = LSTM(32, return_sequences=True)(stock_input)
+
+x_stock = LSTM(32)(x_stock)
 
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
@@ -116,7 +114,7 @@ x_news = Dense(32, activation="relu")(news_input)
 attention_layer = Attention()
 news_context = attention_layer([x_news, x_news])
 news_vector = LSTM(16)(news_context)
-news_vector =Dropout(0.2)(news_vector)
+
 
 # MERGE stock + news first, then apply Dense
 stock_news = Concatenate()([x_stock, news_vector])
@@ -125,7 +123,7 @@ stock_news = Dense(32, activation="relu")(stock_news)
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
 x_sox = LSTM(16)(sox_input)
-x_sox =Dropout(0.2)(x_sox)
+
 
 # MERGE stock_news + sox
 merged = Concatenate()([stock_news, x_sox])
@@ -150,11 +148,7 @@ plot_model(
     rankdir="TB",
     dpi=192
 )
-early_stop = EarlyStopping(
-    monitor="val_loss",
-    patience=20,
-    restore_best_weights=True
-)
+
 # ------------------------------
 # Training
 # ------------------------------
@@ -165,9 +159,8 @@ history = model.fit(
     [X_stock[train_size + TIME_STEP:], X_news[train_size + TIME_STEP:], X_sox[train_size + TIME_STEP:]],
     y[train_size + TIME_STEP:]
     ),
-    epochs=500,
-    batch_size=32,
-    callbacks=[early_stop]
+    epochs=150,
+    batch_size=32
 )
 plt.plot(history.history["loss"], label="Train Loss")
 plt.plot(history.history["val_loss"], label="Validation Loss")
@@ -193,11 +186,16 @@ last_news_scaled = last_news_scaled.reshape(1, last_news_scaled.shape[0], 4)
 last_sox_scaled = sox_scaler.transform(sox_data.iloc[-TIME_STEP-past:-past].values.reshape(-1, 1))
 last_sox_scaled = last_sox_scaled.reshape(1, TIME_STEP, 1)
 
-pred_scaled = model.predict([last_stock_scaled, last_news_scaled, last_sox_scaled])[0]
+pred_returns = model.predict([last_stock_scaled, last_news_scaled, last_sox_scaled])[0]
 
-predicted_close = close_scaler.inverse_transform(
-    pred_scaled.reshape(-1,1)
-).flatten()
+# 用預測報酬率還原成絕對價格
+last_known_price = stock_data["Adj Close"].iloc[-past-1]
+predicted_close = []
+price = last_known_price
+for r in pred_returns:
+    price = price * (1 + r)
+    predicted_close.append(price)
+predicted_close = np.array(predicted_close)
 
 print("\nNext 3 day closing prices:")
 
