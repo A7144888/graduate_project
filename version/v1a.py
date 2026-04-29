@@ -7,7 +7,6 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import plot_model
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention
-
 TIME_STEP = 40
 FORECAST_HORIZON = 3
 
@@ -42,14 +41,21 @@ news_data = news_data.reindex(stock_data.index).fillna(0)
 sox_data = sox_data.reindex(stock_data.index).ffill().bfill()
 sox_data = sox_data.shift(1).bfill()
 # ------------------------------
-# Scaling
+# Scaling  (train 70% / val 15% / test 15%)
 # ------------------------------
-split_idx = int(len(stock_data) * 0.7)
-train_size = split_idx - TIME_STEP - FORECAST_HORIZON + 1
+# 先在「原始資料」上找兩個切點：70% 給 train，70%~85% 給 val，85%~100% 給 test
+split_train = int(len(stock_data) * 0.7)
+split_val   = int(len(stock_data) * 0.85)
 
-train_stock = stock_data.iloc[:split_idx]
-train_news = news_data.iloc[:split_idx]
-train_sox = sox_data.iloc[:split_idx]
+# 換算成 sequence 陣列的索引
+# 一筆 sequence 用到 [i, i+TIME_STEP+FORECAST_HORIZON) 這段資料
+# 對應原始第 N 天前能形成的最後一筆 sequence index = N - TIME_STEP - FORECAST_HORIZON + 1
+train_size = split_train - TIME_STEP - FORECAST_HORIZON + 1
+val_size   = split_val   - TIME_STEP - FORECAST_HORIZON + 1
+
+train_stock = stock_data.iloc[:split_train]
+train_news  = news_data.iloc[:split_train]
+train_sox   = sox_data.iloc[:split_train]
 
 
 stock_scaler = MinMaxScaler()
@@ -121,7 +127,7 @@ stock_news = Dense(32, activation="relu")(stock_news)
 
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
-x_sox = LSTM(16)(sox_input)
+x_sox = LSTM(32)(sox_input)
 
 
 # MERGE stock_news + sox
@@ -151,15 +157,37 @@ plot_model(
 # ------------------------------
 # Training
 # ------------------------------
+# 切出三段 sequence（train / val / test），每段邊界都留 TIME_STEP 緩衝避免洩漏
+X_stock_train, X_news_train, X_sox_train = (
+    X_stock[:train_size], X_news[:train_size], X_sox[:train_size]
+)
+y_train = y[:train_size]
+
+X_stock_val, X_news_val, X_sox_val = (
+    X_stock[train_size + TIME_STEP : val_size],
+    X_news[train_size + TIME_STEP : val_size],
+    X_sox[train_size + TIME_STEP : val_size],
+)
+y_val = y[train_size + TIME_STEP : val_size]
+
+X_stock_test, X_news_test, X_sox_test = (
+    X_stock[val_size + TIME_STEP :],
+    X_news[val_size + TIME_STEP :],
+    X_sox[val_size + TIME_STEP :],
+)
+y_test = y[val_size + TIME_STEP :]
+
+print(f"Train sequences: {len(y_train)}, Val sequences: {len(y_val)}, Test sequences: {len(y_test)}")
+
 history = model.fit(
-    [X_stock[:train_size], X_news[:train_size], X_sox[:train_size]],
-    y[:train_size],
+    [X_stock_train, X_news_train, X_sox_train],
+    y_train,
     validation_data=(
-    [X_stock[train_size + TIME_STEP:], X_news[train_size + TIME_STEP:], X_sox[train_size + TIME_STEP:]],
-    y[train_size + TIME_STEP:]
+        [X_stock_val, X_news_val, X_sox_val],
+        y_val,
     ),
-    epochs=150,
-    batch_size=32
+   epochs=150,
+    batch_size=32,
 )
 plt.plot(history.history["loss"], label="Train Loss")
 plt.plot(history.history["val_loss"], label="Validation Loss")
@@ -167,6 +195,94 @@ plt.title("Model Loss Over Epochs")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.legend()
+plt.show()
+
+# ------------------------------
+# Test evaluation：完整拆解 + 對照 baseline + 散佈圖
+# ------------------------------
+print("\n" + "=" * 60)
+print("Test set evaluation (predicting daily returns)")
+print("=" * 60)
+
+test_loss = model.evaluate(
+    [X_stock_test, X_news_test, X_sox_test],
+    y_test,
+    verbose=0,
+)
+print(f"Test Loss (MSE on returns, all 3 days aggregated): {test_loss:.6f}")
+
+# 拿到 test 上的預測（仍是 return 尺度）
+pred_test = model.predict(
+    [X_stock_test, X_news_test, X_sox_test], verbose=0
+)
+
+
+def report(actual, pred, label):
+    """印 MSE / MAE / RMSE，return 尺度。"""
+    mse = np.mean((actual - pred) ** 2)
+    mae = np.mean(np.abs(actual - pred))
+    rmse = np.sqrt(mse)
+    print(f"  {label:32s}  MSE={mse:.6f}  MAE={mae:.6f}  RMSE={rmse:.6f}")
+    return mse
+
+
+# Baseline: 永遠預測 0 報酬率（≡ 隔天股價 = 今天股價，naive）
+baseline_zero = np.zeros_like(y_test)
+
+print("\n--- Aggregated over all 3 days ---")
+mse_model = report(y_test, pred_test,    "Model (LSTM)")
+mse_naive = report(y_test, baseline_zero,"Baseline: predict 0 return")
+print(f"  Improvement over naive baseline: "
+      f"{(1 - mse_model / mse_naive) * 100:+.2f}%")
+
+print("\n--- Per-day breakdown ---")
+for d in range(FORECAST_HORIZON):
+    print(f"  Day +{d+1}:")
+    report(y_test[:, d], pred_test[:, d],    "    Model")
+    report(y_test[:, d], baseline_zero[:, d],"    Baseline (zero)")
+
+# 預測 / 實際的分布診斷
+print("\n--- Distribution diagnostics (return scale) ---")
+print(f"  Pred  : mean={pred_test.mean():+.5f}  std={pred_test.std():.5f}  "
+      f"min={pred_test.min():+.5f}  max={pred_test.max():+.5f}")
+print(f"  Actual: mean={y_test.mean():+.5f}  std={y_test.std():.5f}  "
+      f"min={y_test.min():+.5f}  max={y_test.max():+.5f}")
+
+# ------------------------------
+# Scatter plot: predicted vs actual (各 day 一張)
+# ------------------------------
+fig, axes = plt.subplots(1, FORECAST_HORIZON, figsize=(14, 4.5))
+for d in range(FORECAST_HORIZON):
+    ax = axes[d]
+    actual_pct = y_test[:, d] * 100
+    pred_pct   = pred_test[:, d] * 100
+
+    ax.scatter(actual_pct, pred_pct, alpha=0.5, s=18, edgecolor="none")
+
+    # y = x 參考線
+    lim = max(np.abs(actual_pct).max(), np.abs(pred_pct).max()) * 1.05
+    ax.plot([-lim, lim], [-lim, lim], "r--", linewidth=0.8, label="y = x (perfect)")
+
+    # 0 軸
+    ax.axhline(0, color="gray", linewidth=0.5)
+    ax.axvline(0, color="gray", linewidth=0.5)
+
+    # 簡單線性擬合，呈現「預測 vs 實際」的傾斜趨勢
+    if actual_pct.std() > 0:
+        slope, intercept = np.polyfit(actual_pct, pred_pct, 1)
+        xs = np.linspace(-lim, lim, 100)
+        ax.plot(xs, slope * xs + intercept, "b-", linewidth=1.2,
+                label=f"fit: slope={slope:.3f}")
+
+    ax.set_xlabel("Actual return (%)")
+    ax.set_ylabel("Predicted return (%)")
+    ax.set_title(f"Day +{d+1}")
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.legend(loc="upper left", fontsize=8)
+
+plt.suptitle("v1a — Predicted vs Actual daily returns (Test set)")
+plt.tight_layout()
 plt.show()
 
 # ------------------------------
