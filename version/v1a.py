@@ -1,14 +1,46 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import plot_model
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention,LayerNormalization
 TIME_STEP = 40
 FORECAST_HORIZON = 3
+
+# Loss 設定：可切換 base loss + 變異性懲罰
+#   BASE_LOSS: "mse" | "mae" | "huber" | "logcosh"
+#   HUBER_DELTA: Huber 在 return 尺度下，超過此值改用線性懲罰（對 outlier 更穩健）
+#   VARIANCE_PENALTY_ALPHA: 變異性懲罰權重；0.0 = 純 base loss，越大越強迫 Pred std → Actual std
+BASE_LOSS = "mse"
+HUBER_DELTA = 0.005
+VARIANCE_PENALTY_ALPHA = 1.3
+
+def _base_loss(y_true, y_pred):
+    if BASE_LOSS == "mse":
+        return tf.reduce_mean(tf.square(y_true - y_pred))
+    if BASE_LOSS == "mae":
+        return tf.reduce_mean(tf.abs(y_true - y_pred))
+    if BASE_LOSS == "huber":
+        err = y_true - y_pred
+        abs_err = tf.abs(err)
+        quadratic = tf.minimum(abs_err, HUBER_DELTA)
+        linear = abs_err - quadratic
+        return tf.reduce_mean(0.5 * tf.square(quadratic) + HUBER_DELTA * linear)
+    if BASE_LOSS == "logcosh":
+        return tf.reduce_mean(tf.math.log(tf.math.cosh(y_pred - y_true)))
+    raise ValueError(f"Unknown BASE_LOSS: {BASE_LOSS}")
+
+
+def variance_aware_loss(y_true, y_pred):
+    """Base loss + 對「預測 std 跟真實 std 的差」做平方懲罰（按 forecast day 各算一次）。"""
+    base = _base_loss(y_true, y_pred)
+    pred_std = tf.math.reduce_std(y_pred, axis=0)
+    target_std = tf.math.reduce_std(y_true, axis=0)
+    var_penalty = tf.reduce_mean(tf.square(pred_std - target_std))
+    return base + VARIANCE_PENALTY_ALPHA * var_penalty
 
 # ------------------------------
 # Load stock data
@@ -110,16 +142,16 @@ X_stock, X_news, X_sox, y = create_dataset(
 # STOCK BRANCH
 stock_input = Input(shape=(TIME_STEP, 6), name="stock_input")
 x_stock = LSTM(32, return_sequences=True)(stock_input)
-
+x_stock= LayerNormalization()(x_stock)#
 x_stock = LSTM(32)(x_stock)
-
+x_stock= LayerNormalization()(x_stock)#
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
 x_news = Dense(32, activation="relu")(news_input)
 attention_layer = Attention()
 news_context = attention_layer([x_news, x_news])
 news_vector = LSTM(16)(news_context)
-
+news_vector = LayerNormalization()(news_vector)#
 
 # MERGE stock + news first, then apply Dense
 stock_news = Concatenate()([x_stock, news_vector])
@@ -128,7 +160,7 @@ stock_news = Dense(32, activation="relu")(stock_news)
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
 x_sox = LSTM(32)(sox_input)
-
+x_sox = LayerNormalization()(x_sox)#
 
 # MERGE stock_news + sox
 merged = Concatenate()([stock_news, x_sox])
@@ -141,7 +173,7 @@ model = Model(inputs=[stock_input, news_input, sox_input], outputs=output)
 
 model.compile(
     optimizer="adam",
-    loss="mse"
+    loss=variance_aware_loss,
 )
 model.summary()
 plot_model(
@@ -313,12 +345,7 @@ for r in pred_returns:
 predicted_close = np.array(predicted_close)
 
 
-pred_scaled_diag = model.predict([X_stock[:50], X_news[:50], X_sox[:50]])
-pred_orig = pred_scaled_diag
-y_orig = y[:50]
-print("Predicted returns (original scale):", pred_orig[:5])
-print("Actual returns (original scale):", y_orig[:5])
-print("Pred std:", pred_orig.std(), "Actual std:", y_orig.std())
+
 actual_close = stock_data["Adj Close"].iloc[-past:-past+3].values
 actual_dates = stock_data.index[-past:-past+3]
 actual_prev_prices = np.concatenate([[last_known_price], actual_close[:-1]])
