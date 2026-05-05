@@ -11,16 +11,19 @@ TIME_STEP = 40
 FORECAST_HORIZON = 3
 
 # Loss 設定：可切換 base loss + 變異性懲罰
-#   BASE_LOSS: "mse" | "mae" | "huber" | "logcosh"
+#   BASE_LOSS: "mse" | "rmse" | "mae" | "huber" | "logcosh"
 #   HUBER_DELTA: Huber 在 return 尺度下，超過此值改用線性懲罰（對 outlier 更穩健）
 #   VARIANCE_PENALTY_ALPHA: 變異性懲罰權重；0.0 = 純 base loss，越大越強迫 Pred std → Actual std
-BASE_LOSS = "mse"
+BASE_LOSS = "rmse"
 HUBER_DELTA = 0.005
 VARIANCE_PENALTY_ALPHA = 1.3
 
 def _base_loss(y_true, y_pred):
     if BASE_LOSS == "mse":
         return tf.reduce_mean(tf.square(y_true - y_pred))
+    if BASE_LOSS == "rmse":
+        mse = tf.reduce_mean(tf.square(y_true - y_pred))
+        return tf.sqrt(tf.maximum(mse, tf.keras.backend.epsilon()))
     if BASE_LOSS == "mae":
         return tf.reduce_mean(tf.abs(y_true - y_pred))
     if BASE_LOSS == "huber":
