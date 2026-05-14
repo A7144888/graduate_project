@@ -28,7 +28,7 @@ def set_seeds(seed: int) -> None:
 #   VARIANCE_PENALTY_ALPHA: 變異性懲罰權重；0.0 = 純 base loss，越大越強迫 Pred std → Actual std
 BASE_LOSS = "logcosh"
 HUBER_DELTA = 0.005
-VARIANCE_PENALTY_ALPHA = 0.8
+VARIANCE_PENALTY_ALPHA = 1.3
 
 def _base_loss(y_true, y_pred):
     if BASE_LOSS == "mse":
@@ -206,11 +206,10 @@ x_stock = LSTM(32)(x_stock)
 x_stock= LayerNormalization()(x_stock)#
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
-x_news = Dense(32, activation="relu")(news_input)
 attention_layer = Attention()
-news_context = attention_layer([x_news,x_news ])
-
-news_vector = LSTM(16)(news_context)
+news_context = attention_layer([news_input,news_input ])
+x_news = Dense(32, activation="relu")(news_context)
+news_vector = LSTM(16)(x_news)
 news_vector = LayerNormalization()(news_vector)#
 
 # MERGE stock + news first, then apply Dense
@@ -238,7 +237,7 @@ model.compile(
 model.summary()
 plot_model(
     model,
-    to_file="architecture_v1a.png",
+    to_file="architecture_v1a_2.png",
     show_shapes=True,
     show_dtype=True,
     show_layer_names=True,
