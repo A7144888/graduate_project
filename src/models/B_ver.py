@@ -16,7 +16,8 @@ from sklearn.preprocessing import MinMaxScaler
 TIME_STEP = 40
 FORECAST_HORIZON = 3
 RNG_SEED = 42
-cutoff_date = "2026-02-24"
+TRAIN_BEFORE_DATE = "2026-02-24"
+FORECAST_AFTER_DATE = "2025-01-01"
 run = False
 
 def set_seeds(seed: int) -> None:
@@ -40,7 +41,7 @@ sox_data = sox_data[["Close"]]
 #dump stock data after ####
 original_stock_data = deepcopy(stock_data)
 
-stock_data = stock_data[stock_data.index < cutoff_date]
+stock_data = stock_data[stock_data.index < TRAIN_BEFORE_DATE]
 # Align news to stock days
 news_data = news_data.reindex(stock_data.index).fillna(0)
 sox_data = sox_data.reindex(stock_data.index).ffill()
@@ -212,16 +213,15 @@ print("Max % Error:", np.max(percentage_error_flat))
 # Forecast
 # ------------------------------
 
-
 if run:
     future_stock = original_stock_data[
-        original_stock_data.index >= cutoff_date
+        original_stock_data.index >= FORECAST_AFTER_DATE
     ][features]
 
     future_news = news_data.reindex(future_stock.index).ffill()
 
     future_sox = pd.read_csv(
-        "stock_^SOX_2021-01-01_to_2026-03-07.csv",
+        "././data/raw/stock_^SOX_2021-01-01_to_2026-03-07.csv",
         parse_dates=["Date"],
         index_col="Date"
     )[["Close"]]

@@ -15,8 +15,8 @@ FORECAST_HORIZON = 3
 RNG_SEED = 42
 run = False
 
-FORECAST_AFTER_DATE = "2026-02-24"
-
+TRAIN_BEFORE_DATE = "2026-02-24"
+forecast_start_date = "2025-01-01"
 
 def set_seeds(seed: int) -> None:
     random.seed(seed)
@@ -127,7 +127,7 @@ _anchor_ts, _forecast_dates = resolve_anchor_after_reference_date(
     stock_data.index,
     TIME_STEP,
     FORECAST_HORIZON,
-    FORECAST_AFTER_DATE,
+    TRAIN_BEFORE_DATE
 )
 stock_data = stock_data.loc[:_anchor_ts]
 news_data = news_data.loc[:_anchor_ts]
@@ -256,18 +256,18 @@ X_stock_train, X_news_train, X_sox_train = (
 y_train = y[:train_size]
 
 X_stock_val, X_news_val, X_sox_val = (
-    X_stock[train_size + TIME_STEP : val_size],
-    X_news[train_size + TIME_STEP : val_size],
-    X_sox[train_size + TIME_STEP : val_size],
+    X_stock[train_size:val_size],
+    X_news[train_size:val_size],
+    X_sox[train_size:val_size],
 )
-y_val = y[train_size + TIME_STEP : val_size]
+y_val = y[train_size:val_size]
 
 X_stock_test, X_news_test, X_sox_test = (
-    X_stock[val_size + TIME_STEP :],
-    X_news[val_size + TIME_STEP :],
-    X_sox[val_size + TIME_STEP :],
+    X_stock[val_size:],
+    X_news[val_size:],
+    X_sox[val_size:],
 )
-y_test = y[val_size + TIME_STEP :]
+y_test = y[val_size:]
 
 print(f"Train sequences: {len(y_train)}, Val sequences: {len(y_val)}, Test sequences: {len(y_test)}")
 
@@ -346,14 +346,13 @@ print("Max % Error:", np.max(percentage_error_flat))
 # ------------------------------
 
 
-
 if run:
 
     # ---------------------------------
     # Use original FULL datasets
     # ---------------------------------
     future_stock = original_stock_data[
-        original_stock_data.index >= FORECAST_AFTER_DATE
+        original_stock_data.index >= forecast_start_date
     ][features]
 
     future_news = original_news_data.reindex(future_stock.index).ffill()
