@@ -8,14 +8,15 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import plot_model
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention,LayerNormalization
+from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention,LayerNormalization,GlobalAveragePooling1D,Multiply
 
 TIME_STEP = 40
 FORECAST_HORIZON = 3
 RNG_SEED = 42
-RUNFORECAST = False
-TRAIN_BEFORE_DATE = "2026-02-24"
-FORECAST_START_DATE = "2025-05-29"
+run = True
+TRAIN_BEFORE_DATE = "2024-01-01"
+forecast_start_date = "2025-01-01"
+
 
 #------------------------------
 def set_seeds(seed: int) -> None:
@@ -27,7 +28,7 @@ def set_seeds(seed: int) -> None:
 
 #   BASE_LOSS: "mse" | "rmse" | "mae" | "huber" | "logcosh"
 #   VARIANCE_PENALTY_ALPHA: 變異性懲罰權重；0.0 = 純 base loss，越大越強迫 Pred std → Actual std
-BASE_LOSS = "logcosh"
+BASE_LOSS = "rmse"
 HUBER_DELTA = 0.005
 VARIANCE_PENALTY_ALPHA = 0.8
 
@@ -127,7 +128,7 @@ _anchor_ts, _forecast_dates = resolve_anchor_after_reference_date(
     stock_data.index,
     TIME_STEP,
     FORECAST_HORIZON,
-    TRAIN_BEFORE_DATE,
+    TRAIN_BEFORE_DATE
 )
 stock_data = stock_data.loc[:_anchor_ts]
 news_data = news_data.loc[:_anchor_ts]
@@ -204,28 +205,26 @@ set_seeds(RNG_SEED)
 stock_input = Input(shape=(TIME_STEP, 6), name="stock_input")
 x_stock = LSTM(32, return_sequences=True)(stock_input)
 x_stock= LayerNormalization()(x_stock)#
-x_stock = LSTM(32)(x_stock)
+x_stock = LSTM(32, return_sequences=True)(x_stock)
 x_stock= LayerNormalization()(x_stock)#
 # NEWS BRANCH
 news_input = Input(shape=(TIME_STEP, 4), name="news_input")
-x_news = Dense(32, activation="relu")(news_input)
-attention_layer = Attention()
-news_context = attention_layer([x_news,x_news ])
-
-news_vector = LSTM(16)(news_context)
-news_vector = LayerNormalization()(news_vector)#
-
-# MERGE stock + news first, then apply Dense
-stock_news = Concatenate()([x_stock, news_vector])
-stock_news = Dense(32, activation="relu")(stock_news)
+x_news = LSTM(32)(news_input)
+#attention_layer = Attention()
+#x_news = attention_layer([x_news, x_news])
+news_vector = LayerNormalization()(x_news)
 
 # SOX BRANCH
 sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
-x_sox = LSTM(32)(sox_input)
+x_sox = LSTM(32,return_sequences=True)(sox_input)
 x_sox = LayerNormalization()(x_sox)#
 
+# concat sox with stock because of same properties, use attention to concat
+attention_layer = Attention()
+stock_sox_concat = attention_layer([x_stock, x_sox])
+stock_sox_concat = GlobalAveragePooling1D()(stock_sox_concat)
 # MERGE stock_news + sox
-merged = Concatenate()([stock_news, x_sox])
+merged = Multiply()([stock_sox_concat, news_vector])
 merged = Dense(32, activation="relu")(merged)
 merged = Dense(16, activation="relu")(merged)
 
@@ -351,14 +350,13 @@ print("Max % Error:", np.max(percentage_error_flat))
 # ------------------------------
 
 
-
-if RUNFORECAST:
+if run:
 
     # ---------------------------------
     # Use original FULL datasets
     # ---------------------------------
     future_stock = original_stock_data[
-        original_stock_data.index >= FORECAST_START_DATE
+        original_stock_data.index >= forecast_start_date
     ][features]
 
     future_news = original_news_data.reindex(future_stock.index).ffill()

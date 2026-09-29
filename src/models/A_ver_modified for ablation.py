@@ -8,16 +8,23 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.utils import plot_model
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Masking, Attention,LayerNormalization,GlobalAveragePooling1D,Multiply
+from tensorflow.keras.layers import Average,Input, LSTM, Dense,Add, Concatenate, Masking, Attention,LayerNormalization,GlobalAveragePooling1D,Multiply
+
 TIME_STEP = 40
 FORECAST_HORIZON = 3
-
 RNG_SEED = 42
-run = False
-
+RUNFORECAST = False
 TRAIN_BEFORE_DATE = "2026-02-24"
-forecast_start_date = "2025-01-01"
-
+FORECAST_START_DATE = "2025-05-29"
+#ablation setting
+USE_NEWS =  True
+USE_SOX = True
+#news and stock data merge method
+SOX_MERGE_METHOD = "multiply" # "concat" | "multiply" | "average" | "add" | "attention"
+NEWS_MERGE_METHOD = "concat" # "concat" | "multiply" | "average" | "add"
+BASE_LOSS = "rmse" # "mse" | "rmse" | "mae" | "huber" | "logcosh"
+#best multiply/concat/rmse
+#------------------------------
 def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -27,7 +34,7 @@ def set_seeds(seed: int) -> None:
 
 #   BASE_LOSS: "mse" | "rmse" | "mae" | "huber" | "logcosh"
 #   VARIANCE_PENALTY_ALPHA: 變異性懲罰權重；0.0 = 純 base loss，越大越強迫 Pred std → Actual std
-BASE_LOSS = "rmse"
+
 HUBER_DELTA = 0.005
 VARIANCE_PENALTY_ALPHA = 0.8
 
@@ -207,29 +214,62 @@ x_stock= LayerNormalization()(x_stock)#
 x_stock = LSTM(32, return_sequences=True)(x_stock)
 x_stock= LayerNormalization()(x_stock)#
 # NEWS BRANCH
-news_input = Input(shape=(TIME_STEP, 4), name="news_input")
-x_news = LSTM(32)(news_input)
-#attention_layer = Attention()
-#x_news = attention_layer([x_news, x_news])
-news_vector = LayerNormalization()(x_news)
+if USE_NEWS:
+    news_input = Input(shape=(TIME_STEP, 4), name="news_input")
+    x_news = LSTM(32)(news_input)
+    x_news= LayerNormalization()(x_news)
+    news_vector = LayerNormalization()(x_news)
 
 # SOX BRANCH
-sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
-x_sox = LSTM(32,return_sequences=True)(sox_input)
-x_sox = LayerNormalization()(x_sox)#
+if USE_SOX:
+    sox_input = Input(shape=(TIME_STEP, 1), name="sox_input")
+    x_sox = LSTM(32,return_sequences=True)(sox_input)
+    x_sox = LayerNormalization()(x_sox)#
 
 # concat sox with stock because of same properties, use attention to concat
-attention_layer = Attention()
-stock_sox_concat = attention_layer([x_stock, x_sox])
+if USE_SOX:
+    if SOX_MERGE_METHOD == "multiply":
+        stock_sox_concat = Multiply()([x_stock, x_sox])
+    elif SOX_MERGE_METHOD == "average":
+        stock_sox_concat = Average()([x_stock, x_sox])
+    elif SOX_MERGE_METHOD == "add":
+        stock_sox_concat = Add()([x_stock, x_sox])
+    elif SOX_MERGE_METHOD == "concat":
+        stock_sox_concat = Concatenate()([x_stock, x_sox])
+    elif SOX_MERGE_METHOD == "attention":
+        attention_layer = Attention()
+        stock_sox_concat = attention_layer([x_stock, x_sox])
+    else:
+        raise ValueError(f"Unknown SOX_MERGE_METHOD: {SOX_MERGE_METHOD}")
+else:
+    stock_sox_concat = x_stock
 stock_sox_concat = GlobalAveragePooling1D()(stock_sox_concat)
 # MERGE stock_news + sox
-merged = Multiply()([stock_sox_concat, news_vector])
-merged = Dense(32, activation="relu")(merged)
-merged = Dense(16, activation="relu")(merged)
+if USE_NEWS:
+    if NEWS_MERGE_METHOD == "multiply":
+        merged = Multiply()([stock_sox_concat, news_vector])
+    elif NEWS_MERGE_METHOD == "average":
+        merged = Average()([stock_sox_concat, news_vector])
+    elif NEWS_MERGE_METHOD == "add":
+        merged = Add()([stock_sox_concat, news_vector])
+    elif NEWS_MERGE_METHOD == "concat":
+        merged = Concatenate()([stock_sox_concat, news_vector]) 
+    else:
+        raise ValueError(f"Unknown NEWS_MERGE_METHOD: {NEWS_MERGE_METHOD}")
+    
+    merged = Dense(32, activation="relu")(merged)
+    merged = Dense(16, activation="relu")(merged)
+else:
+    merged = Dense(32, activation="relu")(stock_sox_concat)
+    merged = Dense(16, activation="relu")(merged)
 
 output = Dense(FORECAST_HORIZON)(merged)
-
-model = Model(inputs=[stock_input, news_input, sox_input], outputs=output)
+inputs = [stock_input]
+if USE_NEWS:
+    inputs.append(news_input)
+if USE_SOX:
+    inputs.append(sox_input)
+model = Model(inputs=inputs, outputs=output)
 
 model.compile(
     optimizer="adam",
@@ -271,16 +311,27 @@ y_test = y[val_size:]
 
 print(f"Train sequences: {len(y_train)}, Val sequences: {len(y_val)}, Test sequences: {len(y_test)}")
 
+train_inputs = [X_stock_train]
+val_inputs = [X_stock_val]
+test_inputs = [X_stock_test]
+if USE_NEWS:
+    train_inputs.append(X_news_train)
+    val_inputs.append(X_news_val)
+    test_inputs.append(X_news_test)
+
+if USE_SOX:
+    train_inputs.append(X_sox_train)
+    val_inputs.append(X_sox_val)
+    test_inputs.append(X_sox_test)
+
 history = model.fit(
-    [X_stock_train, X_news_train, X_sox_train],
+    train_inputs,
     y_train,
-    validation_data=(
-        [X_stock_val, X_news_val, X_sox_val],
-        y_val,
-    ),
-   epochs=100,
+    validation_data= (val_inputs, y_val),
+    epochs=100,
     batch_size=32,
 )
+
 plt.plot(history.history["loss"], label="Train Loss")
 plt.plot(history.history["val_loss"], label="Validation Loss")
 plt.title("Model Loss Over Epochs")
@@ -289,9 +340,8 @@ plt.ylabel("Loss")
 plt.legend()
 plt.show()
 
-X_test = [X_stock_test, X_news_test, X_sox_test]
 
-predictions = model.predict(X_test)
+predictions = model.predict(test_inputs)
 
 
 reconstructed_pred_prices = []
@@ -327,6 +377,9 @@ percentage_error = (
     np.abs(pred_prices - actual_prices)
     / actual_prices
 ) * 100
+for day in range(FORECAST_HORIZON):
+    day_error = np.mean(percentage_error[:, day])
+    print(f"Mean % Error Day {day + 1}: {day_error:.4f}%")
 percentage_error_flat = percentage_error.flatten()
 plt.hist(
     percentage_error_flat,
@@ -346,13 +399,13 @@ print("Max % Error:", np.max(percentage_error_flat))
 # ------------------------------
 
 
-if run:
+if RUNFORECAST:
 
     # ---------------------------------
     # Use original FULL datasets
     # ---------------------------------
     future_stock = original_stock_data[
-        original_stock_data.index >= forecast_start_date
+        original_stock_data.index >= FORECAST_START_DATE
     ][features]
 
     future_news = original_news_data.reindex(future_stock.index).ffill()
@@ -454,7 +507,9 @@ if run:
         np.abs(pred_prices - actual_prices)
         / actual_prices
     ) * 100
-
+    for day in range(FORECAST_HORIZON):
+        day_error = np.mean(percentage_error[:, day])
+        print(f"Mean % Error Day {day + 1}: {day_error:.4f}%")
     percentage_error_flat = percentage_error.flatten()
 
     # ---------------------------------

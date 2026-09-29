@@ -1,1 +1,2 @@
-read_csv
+
+#dump stock data after ####

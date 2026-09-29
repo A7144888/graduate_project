@@ -17,9 +17,12 @@ TIME_STEP = 40
 FORECAST_HORIZON = 3
 RNG_SEED = 42
 TRAIN_BEFORE_DATE = "2026-02-24"
-FORECAST_AFTER_DATE = "2025-01-01"
-run = False
+FORECAST_START_DATE = "2025-05-29"
+RUNFORECAST = False
 
+
+
+#------------------------------
 def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -196,6 +199,9 @@ percentage_error = (
     np.abs(pred_prices - actual_prices)
     / actual_prices
 ) * 100
+for day in range(FORECAST_HORIZON):
+        day_error = np.mean(percentage_error[:, day])
+        print(f"Mean % Error Day {day + 1}: {day_error:.4f}%")
 percentage_error_flat = percentage_error.flatten()
 plt.hist(
     percentage_error_flat,
@@ -213,9 +219,9 @@ print("Max % Error:", np.max(percentage_error_flat))
 # Forecast
 # ------------------------------
 
-if run:
+if RUNFORECAST:
     future_stock = original_stock_data[
-        original_stock_data.index >= FORECAST_AFTER_DATE
+        original_stock_data.index >= FORECAST_START_DATE
     ][features]
 
     future_news = news_data.reindex(future_stock.index).ffill()
@@ -285,7 +291,9 @@ if run:
         np.abs(pred_prices - actual_prices)
         / actual_prices
     ) * 100
-
+    for day in range(FORECAST_HORIZON):
+            day_error = np.mean(percentage_error[:, day])
+            print(f"Mean % Error Day {day + 1}: {day_error:.4f}%")
     # flatten all horizons into 1D
     percentage_error_flat = percentage_error.flatten()
 
